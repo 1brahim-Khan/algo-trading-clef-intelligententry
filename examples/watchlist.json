@@ -1,0 +1,7 @@
+{
+  "week": "2026-10-05",
+  "tickers": [
+    {"symbol": "AAPL", "annotation": "Example only: wait for a daily consolidation breakout supported by volume, then a 30-minute close above resistance. Avoid chasing a gap."},
+    {"symbol": "MSFT", "annotation": "Example only: look for a pullback to rising daily support with a higher low and a 30-minute reclaim. Skip if daily structure breaks."}
+  ]
+}

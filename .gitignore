@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+*.egg-info/
+state/
+artifacts/
+*.sqlite3*
+*.lock
+*.log
+.DS_Store
