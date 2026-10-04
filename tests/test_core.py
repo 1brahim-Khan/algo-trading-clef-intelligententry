@@ -9,6 +9,7 @@ from unittest.mock import patch
 from clef_trader.config import allocation, load_config
 from clef_trader.decision import Clef, QuotaError, validate_response
 from clef_trader.engine import Engine, entry_slot
+from clef_trader.features import context, ema
 from clef_trader.market import ET, Market, clean_bars, hourly, weekly
 from clef_trader.store import BusyLockError, Store
 from clef_trader.watchlist import parse_watchlist
@@ -115,6 +116,7 @@ class CoreTests(unittest.TestCase):
         self.store.write('INSERT INTO watchlists VALUES (?,?)', ('2026-10-05', json.dumps([{'symbol': 'AAPL', 'annotation': 'Pullback and reclaim daily support.'}])))
         self.bundle = {frame: [{'t': '2026-10-05T09:30:00-04:00', 'o': 99, 'h': 101, 'l': 98, 'c': 100, 'v': 10000}] * 30 for frame in ['30Min', '1Hour', '1Day', '1Week']}
         self.engine.market.bundle = lambda symbol, slot: (self.bundle, slot - dt.timedelta(minutes=15, seconds=10))
+        self.engine.market.technical_context = lambda bundle, cutoff: {}
         self.render = patch('clef_trader.charts.render', return_value=b'png')
         self.render.start()
 
@@ -294,6 +296,40 @@ class CoreTests(unittest.TestCase):
         path.write_text('Week: 2026-10-05\nAAPL: Daily support\nAAPL: Daily support\n')
         with self.assertRaises(ValueError):
             parse_watchlist(path, dt.date(2026, 10, 4))
+
+    def test_pasted_dated_heading_grade_and_macro_context(self):
+        path = self.root / 'pasted.txt'
+        path.write_text('June 15th 2026 Weekly Watchlist  $AMCR HTF setting up for blue skies. Grade A  $CSCO Holding gap support. B-  $XMTR Cup building a handle. Grade B+  With momentum improving, respect the $QQQ pivot off the 50ema.')
+        week, items = parse_watchlist(path, dt.date(2026, 10, 4), allow_historical=True)
+        self.assertEqual(week, '2026-06-15')
+        self.assertEqual([i['symbol'] for i in items], ['AMCR', 'CSCO', 'XMTR'])
+        self.assertEqual([i['grade'] for i in items], ['A', 'B-', 'B+'])
+        self.assertIn('$QQQ', items[0]['market_context'])
+        self.assertIn('50ema', items[-1]['market_context'])
+        with self.assertRaises(ValueError):
+            parse_watchlist(path, dt.date(2026, 10, 4))
+
+    def test_pasted_ticker_spelling_is_preserved(self):
+        path = self.root / 'pasted.txt'
+        path.write_text('Week: 2026-10-05 $AMBQ HTF setting for blue skies Grade A $AMN Building a handle. Grade A')
+        _, items = parse_watchlist(path, dt.date(2026, 10, 4))
+        self.assertEqual(items[0]['symbol'], 'AMBQ')
+
+    def test_ema_and_relative_strength_use_numerical_prices(self):
+        self.assertEqual(ema([100, 100, 100], 8), [100, 100, 100])
+        benchmark = [r | {'c': 50} for r in self.bundle['1Day']]
+        result = context(self.bundle, benchmark)
+        self.assertEqual(result['daily_ema_21'], 100)
+        self.assertEqual(result['weekly_ema_8'], 100)
+        self.assertEqual(result['relative_strength']['latest_ratio'], 2)
+
+    def test_json_market_context_is_preserved(self):
+        path = self.root / 'watch.json'
+        path.write_text(json.dumps({'week': '2026-10-05', 'market_context': 'QQQ is reclaiming support.',
+                                   'tickers': [{'symbol': 'AAPL', 'annotation': 'Watch daily support.', 'grade': 'A-'}]}))
+        _, items = parse_watchlist(path, dt.date(2026, 10, 4))
+        self.assertEqual(items[0]['grade'], 'A-')
+        self.assertIn('QQQ', items[0]['market_context'])
 
     def test_hourly_uses_session_alignment(self):
         rows = [{'t': f'2026-10-05T{time}:00-04:00', 'o': 99, 'h': 101, 'l': 98, 'c': 100, 'v': 10} for time in ['09:30', '10:00', '10:30']]

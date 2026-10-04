@@ -4,6 +4,10 @@ from .market import timestamp
 
 
 def render(symbol, timeframe, rows):
+    from .features import ema
+    overlays = []
+    for period, color in ([(21, '#f5bf58'), (50, '#63b8fb')] if timeframe == '1Day' else [(8, '#c69afb')] if timeframe == '1Week' else []):
+        overlays.append((period, color, ema([r['c'] for r in rows], period)[-90:]))
     rows = rows[-90:]
     if not rows:
         raise ValueError('Cannot render an empty chart.')
@@ -19,6 +23,13 @@ def render(symbol, timeframe, rows):
     def y(price):
         return bottom - (price - low) / (high - low) * (bottom - top)
     step = (right - left) / len(rows)
+    for j, (period, color, values) in enumerate(overlays):
+        draw.text((45 + j * 200, 58), f'EMA {period}: {values[-1]:.2f}', fill=color, font=small)
+        points = [(left + (i + .5) * step, y(value)) for i, value in enumerate(values)]
+        # Clip the moving-average line to the price panel.
+        visible = [(x, max(top, min(bottom, height))) for x, height in points]
+        if len(visible) > 1:
+            draw.line(visible, fill=color, width=2)
     for i in range(6):
         price = low + (high - low) * i / 5
         height = y(price)

@@ -227,7 +227,9 @@ class Engine:
         stops = stop_candidates(bundle)
         if not stops:
             raise RuntimeError('No valid numerical stop candidates.')
-        payload, images = make_request(symbol, item['annotation'], bundle, cutoff, stops, self.cfg['model'])
+        technical = self.market.technical_context(bundle, cutoff)
+        payload, images = make_request(symbol, item['annotation'], bundle, cutoff, stops, self.cfg['model'],
+                                       technical, item.get('grade'), item.get('market_context'))
         result, key = self.clef.evaluate(payload, stops)
         amount = allocation(self.cfg, result['probability'])
         artifact_dir = self.root / 'artifacts' / week / symbol / slot.strftime('%Y%m%d-%H%M')

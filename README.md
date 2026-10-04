@@ -8,7 +8,7 @@ The companion [fixed-entry project](https://github.com/1brahim-Khan/algo-trading
 
 1. Import your watchlist with one freeform technical/chart annotation per ticker.
 2. Every 30 minutes during regular trading hours, evaluate tickers that have not entered this week and are not already held.
-3. Fetch consolidated price and volume history; render completed 30-minute, hourly, daily, and weekly candlestick charts. No candle smaller than 30 minutes is analyzed or requested.
+3. Fetch consolidated price and volume history; render completed 30-minute, hourly, daily, and weekly candlestick charts. Daily charts overlay the 21/50 EMAs and weekly charts overlay the 8 EMA. Numerical context includes daily/weekly relative strength versus QQQ, a 252-session price-high window, and the meaning/limits of common watchlist shorthand. No candle smaller than 30 minutes is analyzed or requested.
 4. Send the charts, exact OHLCV values, annotation, and calculated stop candidates to **`@cf/cloudflare/clef`**. Clef selects `enter`, `wait`, or `skip`, a technical stop, and an evidence category. `skip` retires the ticker for this watchlist week; `wait` is reconsidered at the next interval.
 5. Enter only when `enter` has probability ≥ 0.70, model-reported confidence ≥ 0.50, and a defensible stop. The fresh IEX execution reference must be within 2% of the last completed consolidated candle close. Stop distance must be within 12%. These thresholds are configurable experimental parameters, not validated trading performance claims.
 6. Request a confidence-sized `market`/`day` notional order using the configured $2,500/$5,000/$7,500/$10,000 tiers. Keep the position across weeks. Never add to an existing holding or re-enter a ticker during the same week after an order attempt/exit.
@@ -81,6 +81,25 @@ Week: 2026-10-05
 AAPL: Watching the daily consolidation breakout; need volume confirmation.
 MSFT: Pullback to support, then a 30-minute reclaim.
 ```
+
+You can also paste your existing format into a `.txt` file without reformatting:
+
+```text
+October 5th 2026 Weekly Watchlist
+$AAPL Daily flag near resistance. Wait for volume confirmation. Grade A-
+$MSFT Holding weekly support, looking for a reclaim. B+
+With market momentum improving, watch the $QQQ support reclaim.
+```
+
+The parser keeps grades and identifies a market paragraph following the last grade as shared context. A `$QQQ` reference inside that paragraph is not added as a trade target. Grades are the author's opinion and do not automatically change allocation; the chart decision still has to qualify. Symbol spelling and specified price levels are preserved exactly; unavailable symbols are rejected by the broker asset check rather than silently corrected.
+
+Preview any list, including an archived one, without activating it:
+
+```sh
+python -m clef_trader preview-watchlist examples/pasted-format.txt
+```
+
+An old heading such as `June 15th 2026` can be previewed but cannot be imported for October trading. Your supplied historical sample is stored privately in the ignored `state/` folder and is not an active watchlist. For a real new week, provide its actual dated heading and annotations. JSON can also include a top-level `market_context` and per-ticker `grade` fields.
 
 Import the **same file** into both project folders before starting them:
 

@@ -53,8 +53,9 @@ def doctor(api, clef, cfg, root):
     if not completed:
         raise RuntimeError('No completed session available for data/image diagnostics.')
     slot = session_time(completed[-1], 'close') + dt.timedelta(minutes=cfg['data_delay_minutes'], seconds=10)
-    bundle, cutoff = Market(api, cfg).bundle('AAPL', slot)
-    payload, _ = make_request('AAPL', 'Diagnostic only: assess whether there is clear price-action confirmation. No orders will be sent.', bundle, cutoff, stop_candidates(bundle), cfg['model'])
+    market = Market(api, cfg)
+    bundle, cutoff = market.bundle('AAPL', slot)
+    payload, _ = make_request('AAPL', 'Diagnostic only: assess whether there is clear price-action confirmation. No orders will be sent.', bundle, cutoff, stop_candidates(bundle), cfg['model'], market.technical_context(bundle, cutoff))
     result, _ = clef.evaluate(payload, stop_candidates(bundle))
     print(f"Consolidated data, four chart images, and {cfg['model']} response validated; action={result['action']}.")
     print('No order was submitted. Diagnostics count against the free AI quota.')
@@ -66,6 +67,8 @@ def main():
     sub = parser.add_subparsers(dest='command', required=True)
     watch = sub.add_parser('watchlist', help='Import an annotated weekly JSON or text watchlist')
     watch.add_argument('file', type=Path)
+    preview = sub.add_parser('preview-watchlist', help='Parse a watchlist, including archived weeks, without activating it')
+    preview.add_argument('file', type=Path)
     for name in ['run', 'once', 'doctor', 'status', 'demo', 'pause', 'resume']:
         sub.add_parser(name)
     report = sub.add_parser('compare', help='Compare recorded A/B account results')
@@ -77,7 +80,10 @@ def main():
     (root / 'state').mkdir(parents=True, exist_ok=True)
     store = Store(root / 'state' / 'paper.sqlite3')
     atexit.register(store.db.close)
-    if args.command == 'watchlist':
+    if args.command == 'preview-watchlist':
+        week, items = parse_watchlist(args.file.expanduser().resolve(), dt.datetime.now(ET).date(), allow_historical=True)
+        print(json.dumps({'week': week, 'tickers': items, 'activated': False}, indent=2))
+    elif args.command == 'watchlist':
         week, items = parse_watchlist(args.file.expanduser().resolve(), dt.datetime.now(ET).date())
         if store.rows('SELECT 1 FROM decisions WHERE week=? LIMIT 1', (week,)):
             raise ValueError('This week has already been analyzed. Preserve the audit trail; import a future week.')

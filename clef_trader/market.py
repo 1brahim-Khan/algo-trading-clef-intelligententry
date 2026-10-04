@@ -78,6 +78,7 @@ class Market:
     def __init__(self, api, cfg):
         self.api, self.cfg = api, cfg
         self.sessions_cache = {}
+        self.benchmark_cache = {}
 
     def sessions(self, start, end):
         key = (str(start), str(end))
@@ -125,5 +126,14 @@ class Market:
         if len(daily) < 30:
             raise RuntimeError('Insufficient completed daily candles.')
         result = {'30Min': intraday[-100:], '1Hour': hourly(intraday, sessions)[-100:],
-                  '1Day': daily[-180:], '1Week': weekly(daily, monday(cutoff.date()))[-100:]}
+                  '1Day': daily[-400:], '1Week': weekly(daily, monday(cutoff.date()))[-100:]}
         return result, cutoff
+
+    def technical_context(self, bundle, cutoff):
+        from .features import context
+        key = cutoff.date().isoformat()
+        if key not in self.benchmark_cache:
+            start = dt.datetime.combine(cutoff.date() - dt.timedelta(days=750), dt.time(), ET)
+            self.benchmark_cache[key] = [r for r in self.bars('QQQ', '1Day', start, cutoff)
+                                         if timestamp(r['t']).astimezone(ET).date() < cutoff.date()]
+        return context(bundle, self.benchmark_cache[key])
