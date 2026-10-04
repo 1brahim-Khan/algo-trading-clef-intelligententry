@@ -69,6 +69,12 @@ def main():
     watch.add_argument('file', type=Path)
     preview = sub.add_parser('preview-watchlist', help='Parse a watchlist, including archived weeks, without activating it')
     preview.add_argument('file', type=Path)
+    backtest = sub.add_parser('backtest', help='Read-only historical A/B replay; never sends broker orders')
+    backtest.add_argument('file', type=Path, help='Archived annotated watchlist')
+    backtest.add_argument('--start', required=True, help='First replay date, YYYY-MM-DD')
+    backtest.add_argument('--end', required=True, help='Last replay date, YYYY-MM-DD; open winners are marked at close')
+    backtest.add_argument('--repeat-watchlist', action='store_true', help='Explicitly allow entries from this list in later weeks')
+    backtest.add_argument('--slippage-bps', type=float, default=10, help='Adverse slippage per side, in basis points (default 10)')
     for name in ['run', 'once', 'doctor', 'status', 'demo', 'pause', 'resume']:
         sub.add_parser(name)
     report = sub.add_parser('compare', help='Compare recorded A/B account results')
@@ -77,6 +83,23 @@ def main():
     root = args.project.expanduser().resolve()
     cfg = load_config(root)
     load_env(root / '.env')
+    if args.command == 'backtest':
+        # Do not open, bind, import into, or modify the paper-trading ledger.
+        from .backtest import run_backtest
+        for name in ('APCA_API_KEY_ID', 'APCA_API_SECRET_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN'):
+            if not os.environ.get(name):
+                raise ValueError(f'Missing {name}. Configure .env locally; historical replay needs Alpaca data and Clef access.')
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+        clef = Clef(cache_dir(root), cfg)
+        atexit.register(clef.db.close)
+        directory, result = run_backtest(Alpaca(), clef, cfg, root, args.file.expanduser().resolve(),
+                                        args.start, args.end, args.repeat_watchlist, args.slippage_bps)
+        summary = {mode: {k: v for k, v in r.items() if k not in {'trades', 'open_holdings', 'equity_curve', 'skipped_allocations'}}
+                   for mode, r in result['results'].items()}
+        print(json.dumps({'status': result['status'], 'results': summary,
+                          'excluded_symbols': result['exclusions'], 'coverage_gaps': len(result['coverage_gaps'])}, indent=2))
+        print(f'Report: {directory / "report.html"}\nDetailed results: {directory / "report.json"}')
+        return
     (root / 'state').mkdir(parents=True, exist_ok=True)
     store = Store(root / 'state' / 'paper.sqlite3')
     atexit.register(store.db.close)
@@ -142,7 +165,7 @@ def entrypoint():
     try:
         main()
     except KeyboardInterrupt:
-        print('\nScheduler stopped. Broker orders already accepted remain active.', file=sys.stderr)
+        print('\nStopped.', file=sys.stderr)
     except (ValueError, RuntimeError, KeyError) as error:
         print(f'Error: {error}', file=sys.stderr)
         raise SystemExit(1) from None

@@ -137,6 +137,32 @@ python -m clef_trader demo
 
 Every analysis saves four PNG charts plus exact input context, typed questions, raw Clef probabilities/confidence, and a shared cache hash under `artifacts/`. Model-selected evidence labels are audit categories; Clef does not generate a prose explanation. The allocation logged for `wait`/`skip` is hypothetical and does not mean an order was placed.
 
+## Historical A/B backtest
+
+Run the historical replay from **either** repository. One command simulates both sizing policies with separate $100,000 portfolios (or `capital_limit` if changed), the same Clef decisions, and the same execution assumptions. It reads historical data and calls Clef; it never submits broker orders, imports an active watchlist, or opens/changes the paper-trading ledger. Only one Alpaca data key pair is needed for this replay.
+
+For the privately saved June 15 example, from the project directory:
+
+```sh
+.venv/bin/python -m clef_trader backtest state/historical-watchlist-2026-06-15.txt --start 2026-06-15 --end 2026-06-26
+```
+
+The private file exists in the local projects created in this session, not in GitHub. After a fresh clone, save your own archived watchlist file and substitute its path. Configure the Alpaca and Cloudflare keys in `.env` first. There are no real June performance results included in the repository; tests use synthetic market data and a simulated model.
+
+By default, the June 15 list is eligible for new entries **only in its original week**. Positions remain monitored through June 26, including technical stops and a daily loss check five minutes before close. Alpaca's historical calendar determines holidays/early closes. End-of-period winners stay open and are marked at the final close. `--repeat-watchlist` is an explicit alternative for a different experiment; omit it for this June test.
+
+`artifacts/backtests/<run-id>/report.html` shows both portfolios' equity, return, realized/unrealized P/L, entry/exit counts, sampled maximum drawdown, equity curves, trades, remaining holdings, and data coverage. `report.json` holds detailed results and the model decisions; each analysis also saves the historical charts and input context. Excluded/unavailable symbols retain their original spelling and appear in the report. Other missing analysis/execution samples are reported as coverage gaps; a missing candle for a held position pauses the replay rather than inventing a valuation.
+
+The chart builder exposes only completed candles available at the simulated timestamp, reproducing the configured data delay. Future candles are excluded even though the archive is prefetched. A past IEX trade reproduces the entry-price guard. Entries use the first valid historical SIP ask within ten seconds after the decision; daily loss exits compare a recent past SIP trade with average entry price and fill at a historical bid. Both sides add 10 basis points of adverse slippage by default. Use `--slippage-bps 0` or another value from 0–100 for a sensitivity test. Slippage or settings changes create a separate run ID.
+
+**This is an approximate historical simulation.** Technical stops use completed 30-minute OHLC bars wholly after entry, with a worse opening price on gaps. The first partial candle after entry is excluded because its low may precede the fill; this can miss a real stop and overstate returns. Stops are recorded at bar end, not at the true trigger time. Daily-red exits are sampled once before close, rather than reproducing every live polling cycle. The replay assumes immediate full fractional fills; it does not model order latency, partial fills, fees, or the broker's internal position valuation.
+
+Historical prices are raw, avoiding today's retroactive split adjustment in past decision inputs. Split/dividend/share changes are not simulated, and raw lookback charts spanning a split may distort technical indicators. **Verify corporate actions over both the evaluation period and chart lookback before treating any result as meaningful.** No current asset listing is used as a substitute for historical tradability.
+
+Clef was [released October 1, 2026](https://blog.cloudflare.com/clef-decision-models/), after the June sample. Although the supplied charts contain no future candles, the current model's training knowledge may include later outcomes. This is retrospective analysis, not an unbiased test of what a June-deployed model would have done. Forward paper results remain necessary to evaluate the experiment.
+
+Historical consolidated bars, trades, and quotes use Alpaca's [historical data access](https://docs.alpaca.markets/us/docs/market-data-faq); June data is older than the Basic plan's 15-minute restriction. Actual entitlement is checked by the requests; there is no fallback to fabricated data. Archive files are cached locally in `../.clef-backtest-data` and Clef uses the existing shared AI cache. Backtests count against the same real-day Cloudflare allowance as the paper schedulers. Many waiting tickers can require hundreds of evaluations; the free AI allowance may stretch a replay across multiple days. Quota exhaustion saves a partial report and checkpoint. Rerun **the identical command** after the quota resets to resume without duplicating decisions or entries. Partial reports are visibly labeled. API failures pause the replay, preserving its checkpoint for retry.
+
 ## Order and stop limits
 
 The $100,000 cap is per strategy, also limited by actual available cash/buying power; the app never uses margin to spend more than cash. Existing positions and pending buys count toward the capital cap. A/B balances must be configured in Alpaca; this app does not fund/reset accounts. Only active fractional US equities are accepted for dollar-sized entries.
