@@ -182,3 +182,7 @@ python -m unittest discover -s tests -v
 ```
 
 Tests simulate model and broker responses, including accepted orders with lost responses, ownership protection, sizing, cash/exposure limits, delayed-data scheduling, early closes, daily-red exits, and quota handling. Real market/model connectivity and paper fills require your keys and a successful `doctor` run. No broker order is submitted by tests or the demo.
+
+## Telegram notifications
+
+Confirmed-fill alerts and combined nightly portfolio reports run independently of trading and use no AI quota. See [NOTIFICATIONS.md](NOTIFICATIONS.md) for Telegram setup, report definitions, and local service commands.
