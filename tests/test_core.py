@@ -315,6 +315,25 @@ class CoreTests(unittest.TestCase):
         _, items = parse_watchlist(path, dt.date(2026, 10, 4))
         self.assertEqual(items[0]['symbol'], 'AMBQ')
 
+    def test_current_year_leading_grades_ratings_levels_and_emoji_context(self):
+        path = self.root / 'pasted.txt'
+        path.write_text('October 5th Weekly Watchlist $ALAB Grade A+ RS 98 Flagging under supply. $APH Grade A- RS 88 Testing $88 supply pivot. $XMTR Grade B RS 98 Showing RS [🔵](https://fonts.gstatic.com/icon.png) new high. With the market pushing to new highs focus on leaders and $QQQ support.')
+        week, items = parse_watchlist(path, dt.date(2026, 10, 4))
+        self.assertEqual(week, '2026-10-05')
+        self.assertEqual([i['symbol'] for i in items], ['ALAB', 'APH', 'XMTR'])
+        self.assertEqual([i['grade'] for i in items], ['A+', 'A-', 'B'])
+        self.assertEqual([i['rs_rating'] for i in items], [98, 88, 98])
+        self.assertIn('$88', items[1]['annotation'])
+        self.assertIn('🔵', items[2]['annotation'])
+        self.assertNotIn('fonts.gstatic', items[2]['annotation'])
+        self.assertEqual(items[0]['market_context'], 'With the market pushing to new highs focus on leaders and $QQQ support.')
+
+    def test_author_rs_rating_is_passed_separately_to_model(self):
+        self.engine.analyze('2026-10-05', {'symbol': 'AAPL', 'annotation': 'Reclaim daily support.', 'grade': 'A+', 'rs_rating': 98}, self.api.now)
+        analysis = next((self.root / 'artifacts').glob('**/analysis.json'))
+        data = json.loads(analysis.read_text())
+        self.assertEqual(data['state']['watchlist_rs_rating']['value'], 98)
+
     def test_ema_and_relative_strength_use_numerical_prices(self):
         self.assertEqual(ema([100, 100, 100], 8), [100, 100, 100])
         benchmark = [r | {'c': 50} for r in self.bundle['1Day']]

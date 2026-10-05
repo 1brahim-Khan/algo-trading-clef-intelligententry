@@ -91,7 +91,7 @@ $MSFT Holding weekly support, looking for a reclaim. B+
 With market momentum improving, watch the $QQQ support reclaim.
 ```
 
-The parser keeps grades and identifies a market paragraph following the last grade as shared context. A `$QQQ` reference inside that paragraph is not added as a trade target. Grades are the author's opinion and do not automatically change allocation; the chart decision still has to qualify. Symbol spelling and specified price levels are preserved exactly; unavailable symbols are rejected by the broker asset check rather than silently corrected.
+The parser supports grades before or after the annotation and preserves author-supplied `RS 98`-style ratings separately from calculated ticker/QQQ relative strength. A heading without a year uses the import/preview date's year; use an explicit year for archives. Dollar price levels such as `$88` are not ticker symbols. Pasted emoji image links become their emoji labels. The concluding market paragraph is shared context for every ticker. A `$QQQ` reference inside that paragraph is not added as a trade target. Grades are the author's opinion and do not automatically change allocation; the chart decision still has to qualify. Symbol spelling and specified price levels are preserved exactly; unavailable symbols are rejected by the broker asset check rather than silently corrected.
 
 Preview any list, including an archived one, without activating it:
 

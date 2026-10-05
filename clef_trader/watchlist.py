@@ -7,12 +7,15 @@ from .market import monday
 MONTHS = 'January February March April May June July August September October November December'.split()
 
 
-def pasted_watchlist(text):
-    heading = re.search(r'(' + '|'.join(MONTHS) + r')\s+(\d{1,2})(?:st|nd|rd|th)?\s+(\d{4})\s+Weekly\s+Watchlist', text, re.I)
+def pasted_watchlist(text, reference_year=None):
+    heading = re.search(r'(' + '|'.join(MONTHS) + r')\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s+(\d{4}))?\s+Weekly\s+Watchlist', text, re.I)
     explicit = re.search(r'Week\s*:\s*(\d{4}-\d{2}-\d{2})', text, re.I)
     if heading:
         month = next(i + 1 for i, name in enumerate(MONTHS) if name.lower() == heading[1].lower())
-        week = dt.date(int(heading[3]), month, int(heading[2])).isoformat()
+        year = int(heading[3]) if heading[3] else reference_year
+        if year is None:
+            raise ValueError('Include the year in the Weekly Watchlist heading.')
+        week = dt.date(year, month, int(heading[2])).isoformat()
     elif explicit:
         week = explicit[1]
     else:
@@ -22,18 +25,29 @@ def pasted_watchlist(text):
     for i, match in enumerate(matches):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         body = text[match.end():end].strip()
+        leading_grade = re.match(r'Grade\s+([A-F][+-]?)(?=\s|$)', body, re.I)
         grade = re.search(r'(?:\bGrade\s+([A-F][+-]?)|\b([A-F][+-]?))(?=\s*(?:$|With\b|Market\s+context\b|Overall\b))', body, re.I)
-        annotation = body[:grade.end()].strip() if grade else body
+        market = re.search(r'\b(?:With\s+the\s+market\b|Market\s+context\s*:)', body, re.I)
+        annotation = body[:market.start()].strip() if market else body[:grade.end()].strip() if grade else body
+        # Preserve the meaning of pasted emoji labels without passing their
+        # presentation-only font image URLs to the decision model.
+        annotation = re.sub(r'\[(🔵|☕️?)\]\(https?://[^)]+\)', r'\1', annotation)
         if not annotation:
             raise ValueError('Every ticker needs an annotation.')
         item = {'symbol': match[1], 'annotation': annotation}
-        if grade:
+        if leading_grade:
+            item['grade'] = leading_grade[1].upper()
+        elif grade:
             item['grade'] = (grade[1] or grade[2]).upper()
+        rating = re.search(r'\bRS\s+(\d{1,3})\b', annotation)
+        if rating:
+            item['rs_rating'] = int(rating[1])
         items.append(item)
-        if grade and body[grade.end():].strip():
+        if market or (grade and body[grade.end():].strip()):
             # Treat the trailing market paragraph as context, including any $QQQ
             # reference inside it. It is not another entry target.
-            absolute_end = match.end() + len(text[match.end():end]) - len(text[match.end():end].lstrip()) + grade.end()
+            boundary = market.start() if market else grade.end()
+            absolute_end = match.end() + len(text[match.end():end]) - len(text[match.end():end].lstrip()) + boundary
             context = text[absolute_end:].strip()
             break
     return {'week': week, 'tickers': items, 'market_context': context}
@@ -44,7 +58,7 @@ def parse_watchlist(path, today, allow_historical=False):
     if path.suffix.lower() == '.json':
         data = json.loads(text)
     elif '$' in text:
-        data = pasted_watchlist(text)
+        data = pasted_watchlist(text, today.year)
     else:
         data = {'tickers': []}
         for line in text.splitlines():
@@ -82,6 +96,11 @@ def parse_watchlist(path, today, allow_historical=False):
         result = {'symbol': symbol, 'annotation': annotation}
         if item.get('grade'):
             result['grade'] = str(item['grade'])
+        if 'rs_rating' in item:
+            rating = item['rs_rating']
+            if isinstance(rating, bool) or not isinstance(rating, int) or not 0 <= rating <= 100:
+                raise ValueError('RS ratings must be integers from 0 through 100.')
+            result['rs_rating'] = rating
         if data.get('market_context'):
             result['market_context'] = str(data['market_context'])[:8000]
         normalized.append(result)

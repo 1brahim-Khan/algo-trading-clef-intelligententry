@@ -326,7 +326,7 @@ class Backtest:
                     if not stops:
                         raise RuntimeError('No valid technical stops.')
                     payload, images = make_request(symbol, item['annotation'], bundle, cutoff, stops, self.cfg['model'],
-                                                   self.market.technical_context(bundle, cutoff), item.get('grade'), item.get('market_context'))
+                                                   self.market.technical_context(bundle, cutoff), item.get('grade'), item.get('market_context'), item.get('rs_rating'))
                 except (ValueError, RuntimeError) as error:
                     if isinstance(error, APIError):
                         if error.status != 404:

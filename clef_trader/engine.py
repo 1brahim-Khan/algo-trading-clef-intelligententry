@@ -229,7 +229,7 @@ class Engine:
             raise RuntimeError('No valid numerical stop candidates.')
         technical = self.market.technical_context(bundle, cutoff)
         payload, images = make_request(symbol, item['annotation'], bundle, cutoff, stops, self.cfg['model'],
-                                       technical, item.get('grade'), item.get('market_context'))
+                                       technical, item.get('grade'), item.get('market_context'), item.get('rs_rating'))
         result, key = self.clef.evaluate(payload, stops)
         amount = allocation(self.cfg, result['probability'])
         artifact_dir = self.root / 'artifacts' / week / symbol / slot.strftime('%Y%m%d-%H%M')

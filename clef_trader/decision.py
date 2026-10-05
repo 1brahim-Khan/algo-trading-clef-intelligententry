@@ -44,7 +44,7 @@ def validate_response(response, stops, model):
             'stop_choice': stop['choice'], 'evidence': evidence['choice'], 'raw': response}
 
 
-def make_request(symbol, annotation, bundle, cutoff, stops, model, technical_context=None, grade=None, market_context=None):
+def make_request(symbol, annotation, bundle, cutoff, stops, model, technical_context=None, grade=None, market_context=None, rs_rating=None):
     from .charts import render
     images = {frame: render(symbol, frame, bars) for frame, bars in bundle.items() if bars}
     payload = {
@@ -74,6 +74,9 @@ def make_request(symbol, annotation, bundle, cutoff, stops, model, technical_con
         },
         'images': [{'content_type': 'image/png', 'base64': base64.b64encode(value).decode()} for value in images.values()]
     }
+    if rs_rating is not None:
+        payload['state']['watchlist_rs_rating'] = {'value': rs_rating,
+            'meaning': 'Author-supplied relative-strength ranking, provider unverified. This is distinct from the calculated ticker/QQQ price ratio and is not a profit probability.'}
     return payload, images
 
 
