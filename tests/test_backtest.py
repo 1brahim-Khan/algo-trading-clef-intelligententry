@@ -252,6 +252,7 @@ class HistoryTests(unittest.TestCase):
     def test_prefetched_future_is_not_exposed_to_chart_queries(self):
         with tempfile.TemporaryDirectory() as directory:
             history = History(None, Path(directory), START, END)
+            history.action_audit['WIN'] = {}
             rows = Archive().series('WIN', '30Min')
             history.loaded['WIN', '30Min'] = rows
             cutoff = '2026-06-15T10:00:00-04:00'
@@ -298,6 +299,29 @@ class HistoryTests(unittest.TestCase):
                 history.reference_trade('WIN', instant)
             with self.assertRaises(RuntimeError):
                 history.execution_quote('WIN', instant)
+
+    def test_split_adjustment_uses_only_effective_past_events_and_scales_volume(self):
+        with tempfile.TemporaryDirectory() as directory:
+            history = History(None, Path(directory), START, END)
+            history.action_audit['WIN'] = {'reverse_splits': [{'symbol': 'WIN', 'ex_date': '2026-01-15', 'old_rate': 5, 'new_rate': 1}],
+                                           'forward_splits': [{'symbol': 'WIN', 'ex_date': '2026-10-01', 'old_rate': 1, 'new_rate': 4}]}
+            row = {'t': '2025-12-01T00:00:00-05:00', 'o': 10, 'h': 11, 'l': 9, 'c': 10, 'v': 1000}
+            cutoff = dt.datetime(2026, 6, 15, 10, 0, tzinfo=ET)
+            adjusted = history.adjusted_view('WIN', [row], cutoff)[0]
+            self.assertEqual(adjusted['c'], 50)
+            self.assertEqual(adjusted['v'], 200)
+            self.assertEqual(row['c'], 10)  # The execution archive remains raw.
+            earlier = dt.datetime(2026, 1, 14, 10, 0, tzinfo=ET)
+            unchanged = history.adjusted_view('WIN', [row], earlier)[0]
+            self.assertEqual(unchanged['c'], 10)
+            self.assertEqual(json.dumps(unchanged), json.dumps(row))
+
+    def test_unmodeled_corporate_action_during_test_refuses_entire_range(self):
+        with tempfile.TemporaryDirectory() as directory:
+            history = History(None, Path(directory), START, END, ['WIN'])
+            history.action_audit['WIN'] = {'forward_splits': [{'symbol': 'WIN', 'ex_date': '2026-06-22', 'old_rate': 1, 'new_rate': 4}]}
+            with self.assertRaisesRegex(RuntimeError, 'explicit corporate-action modeling'):
+                history.validate_actions()
 
 
 if __name__ == '__main__':

@@ -37,6 +37,9 @@ class Alpaca:
     def data(self, path, params):
         return request_json('https://data.alpaca.markets/v2' + path + '?' + urllib.parse.urlencode(params), self.headers)
 
+    def corporate_actions(self, params):
+        return request_json('https://data.alpaca.markets/v1/corporate-actions?' + urllib.parse.urlencode(params), self.headers)
+
     def clock(self):
         return self.trading('/clock')
 

@@ -19,10 +19,12 @@ def fingerprint(value):
 
 class History:
     """Downloads immutable windows once, then presents time-bounded views."""
-    def __init__(self, api, directory, start, end):
+    def __init__(self, api, directory, start, end, symbols=None):
         self.api, self.directory, self.start, self.end = api, directory, start, end
         directory.mkdir(parents=True, exist_ok=True)
         self.loaded = {}
+        self.symbols = sorted(set(symbols or []))
+        self.action_audit = {}
         self.last_request = 0
 
     def cached(self, path, params):
@@ -35,11 +37,63 @@ class History:
             if wait > 0:
                 time.sleep(wait)
             self.last_request = time.monotonic()
-            result = self.api.data(path, params)
+            result = self.api.corporate_actions(params) if path == '/corporate-actions' else self.api.data(path, params)
             temporary = file.with_suffix('.tmp')
             temporary.write_text(json.dumps(result))
             temporary.replace(file)
             return result
+
+    def actions(self, symbol):
+        key = ','.join(self.symbols) if self.symbols else symbol
+        if key not in self.action_audit:
+            params = {'symbols': key, 'start': str(dt.date.fromisoformat(self.start) - dt.timedelta(days=800)),
+                      'end': self.end, 'limit': 1000}
+            groups, pages = {}, set()
+            while True:
+                result = self.cached('/corporate-actions', params)
+                for kind, rows in result.get('corporate_actions', {}).items():
+                    groups.setdefault(kind, []).extend(rows)
+                token = result.get('next_page_token')
+                if not token:
+                    break
+                if token in pages or len(pages) >= 50:
+                    raise RuntimeError('Unexpected corporate-action pagination.')
+                pages.add(token)
+                params['page_token'] = token
+            self.action_audit[key] = groups
+        return {kind: [a for a in rows if symbol in [a.get(k) for k in ('symbol', 'old_symbol', 'new_symbol', 'acquiree_symbol', 'acquirer_symbol')]]
+                for kind, rows in self.action_audit[key].items()}
+
+    def adjusted_view(self, symbol, rows, cutoff):
+        actions = self.actions(symbol)
+        splits = []
+        for kind, events in actions.items():
+            for event in events:
+                effective = event.get('ex_date') or event.get('effective_date') or event.get('process_date')
+                if not effective:
+                    raise RuntimeError(f'Incomplete corporate-action date for {symbol}.')
+                if kind in {'forward_splits', 'reverse_splits'} and effective <= cutoff.astimezone(ET).date().isoformat():
+                    old, new = float(event['old_rate']), float(event['new_rate'])
+                    if not all(math.isfinite(v) and v > 0 for v in [old, new]):
+                        raise RuntimeError(f'Invalid split ratio for {symbol}.')
+                    splits.append((effective, old / new))
+        adjusted = []
+        for row in rows:
+            factor = math.prod(ratio for date, ratio in splits if timestamp(row['t']).astimezone(ET).date().isoformat() < date)
+            # Keep integer/float representations unchanged when no adjustment
+            # is needed, preserving the exact shared decision-cache payload.
+            adjusted.append(row if factor == 1 else row | {k: row[k] * factor for k in ('o', 'h', 'l', 'c')} | {'v': row['v'] / factor})
+        return adjusted
+
+    def validate_actions(self):
+        # Refuse the entire unsupported dataset up front rather than using a
+        # future event to silently exclude a symbol from earlier decisions.
+        for symbol in self.symbols:
+            for kind, events in self.actions(symbol).items():
+                for event in events:
+                    effective = event.get('ex_date') or event.get('effective_date') or event.get('process_date')
+                    if effective and self.start <= effective <= self.end and kind != 'cash_dividends':
+                        raise RuntimeError(f'{symbol} has a {kind} event on {effective} during the replay; this range needs explicit corporate-action modeling.')
 
     def calendar(self, start, end):
         if not hasattr(self, 'all_sessions'):
@@ -80,7 +134,7 @@ class History:
         symbol = path.split('/')[2]
         start, end = timestamp(params['start']), timestamp(params['end'])
         rows = [r for r in self.series(symbol, params['timeframe']) if start <= timestamp(r['t']) <= end]
-        return {'bars': rows, 'next_page_token': None}
+        return {'bars': self.adjusted_view(symbol, rows, end), 'next_page_token': None}
 
     def execution_quote(self, symbol, instant):
         params = {'start': instant.isoformat(), 'end': (instant + dt.timedelta(seconds=10)).isoformat(),
@@ -177,7 +231,7 @@ def assumptions(cfg, slippage_bps):
     return [
         'Current Clef is applied retrospectively. Input candles are bounded by simulated time; pretraining knowledge of later events cannot be excluded.',
         f"Signal charts reproduce the configured {cfg['data_delay_minutes']}-minute delay and use completed candles of 30 minutes or longer.",
-        'Historical bars use raw prices and symbol mapping as of the run start. Automatic split/dividend/share adjustments are not simulated; verify corporate actions before interpreting results.',
+        'Execution bars use raw prices. Chart history is adjusted only for stock splits effective by the simulated cutoff, including volume. The run refuses ranges with non-cash corporate actions during the replay; dividends are disclosed but cash distributions are not modeled. Symbol mapping is as of the run start.',
         'Entries use a past IEX reference trade and first valid SIP ask within 10 seconds after the decision, with adverse slippage. These are simulated immediate fractional fills, not reconstructed Alpaca paper executions.',
         'Stops are approximated from completed 30-minute OHLC bars wholly after entry and recorded at bar end. The entry candle is excluded because its low may precede the fill; this can miss a real stop and overstate returns. Gaps fill at the worse of opening price and stop, plus adverse slippage. This is not the live 15-second software stop.',
         f"Daily-red exits are sampled once {cfg['close_exit_minutes']} minutes before close using a past SIP trade, then a historical bid. Live repeated polling during the final minutes is not reproduced.",
@@ -212,12 +266,13 @@ class Backtest:
         temporary.write_text(json.dumps(saved, indent=2))
         temporary.replace(self.checkpoint)
         report = {'status': status, 'start': self.start, 'end': self.end, 'watchlist_week': self.week,
-                  'replay_version': 1, 'configuration': self.cfg | {'strategy': 'ab'},
+                  'replay_version': 2, 'configuration': self.cfg | {'strategy': 'ab'},
                   'slippage_bps': self.slippage * 10000, 'watchlist': self.items,
                   'repeat_watchlist': self.repeat, 'processed_events': self.index, 'total_events': len(self.events),
                   'completed': self.index == len(self.events), 'error': self.error,
                   'assumptions': assumptions(self.cfg, self.slippage * 10000), 'exclusions': self.exclusions,
                   'coverage_gaps': self.coverage, 'watchlist_symbols': [i['symbol'] for i in self.items],
+                  'corporate_action_audit': getattr(self.history, 'action_audit', {}),
                   'decisions': self.decisions, 'results': {mode: p.report() for mode, p in self.portfolios.items()}}
         (self.directory / 'report.json').write_text(json.dumps(report, indent=2))
         write_html(self.directory / 'report.html', report)
@@ -379,10 +434,11 @@ def run_backtest(api, clef, cfg, root, file, start, end, repeat=False, slippage_
     if not repeat and monday(dt.date.fromisoformat(start)).isoformat() != week:
         raise ValueError('Start within the original watchlist week, or explicitly choose --repeat-watchlist.')
     identity = fingerprint({'cfg': cfg | {'strategy': 'ab'}, 'items': items, 'week': week,
-                            'start': start, 'end': end, 'repeat': repeat, 'slippage_bps': slippage_bps, 'replay_version': 1})[:20]
+                            'start': start, 'end': end, 'repeat': repeat, 'slippage_bps': slippage_bps, 'replay_version': 2})[:20]
     directory = root / 'artifacts' / 'backtests' / identity
-    history = History(api, root.parent / '.clef-backtest-data', start, end)
+    history = History(api, root.parent / '.clef-backtest-data', start, end, [i['symbol'] for i in items] + ['QQQ'])
     with exclusive(directory / 'run.lock'):
+        history.validate_actions()
         replay = Backtest(history, clef, cfg, items, week, start, end, directory, repeat, slippage_bps)
         logging.info('Historical replay: %s; checkpoints resume when the same command is rerun.', directory)
         try:
